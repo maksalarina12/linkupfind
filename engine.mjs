@@ -17,6 +17,96 @@ const JS_LOCATION_RE =
 const MAX_FETCH_BUDGET = 14;
 const MAX_MINUTES = 90000;
 
+// ---- decoder generik link yang nyembunyiin target di param/base64 ----
+
+function b64tryDecode(v) {
+  if (typeof v !== 'string') return null;
+  const s = v.trim().replace(/\s+/g, '');
+  if (s.length < 12 || s.length > 4096) return null;
+  const clean = s.replace(/[^A-Za-z0-9+/=]/g, '');
+  if (!clean) return null;
+  try {
+    const padded = clean.endsWith('=') ? clean : clean + '='.repeat((4 - (clean.length % 4)) % 4);
+    const bin = atob(padded);
+    if (!bin || !/[\x20-\x7e]/.test(bin.slice(0, 12))) return null;
+    const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
+    let text = new TextDecoder().decode(bytes).trim();
+    // string hasil hex-escape (\x..) yang nempel di script: buang prefix \x00 dst
+    text = text.replace(/[\x00-\x1f]+/g, ' ');
+    return text;
+  } catch {
+    return null;
+  }
+}
+
+// safelink blogger (template ecd/dcd): atob(param) -> buang 3 junk di ujung ->
+// sisip junk 3 char di tengah -> b64 lagi -> prefix "http"
+function dcdDecode(s) {
+  if (!s || s.length < 12) return null;
+  const inner = s.slice(3, -3);
+  if (inner.length < 5) return null;
+  const dec = b64tryDecode(inner.slice(0, 3) + inner.slice(6));
+  if (!dec) return null;
+  // template safelink hasilnya di-prefix "http": "s://x" | "://x" | "//x"
+  if (/^(?:s?:?|)\/\//.test(dec)) return 'http' + dec;
+  if (/^(?:https?)\/\//i.test(dec)) return dec;
+  return null;
+}
+
+function extractDecodedUrl(text) {
+  if (!text || text.length > 2048 || /\x00/.test(text.slice(0, 4))) return null;
+  let m = text.match(/https?:\/\/[^\s"'<>\\)]+/i);
+  let url;
+  if (m) url = m[0];
+  else {
+    // pola "http//domain..." hasil decode template safelink
+    m = text.match(/(https?)\s*[:|]?\s*(\/\/[^\s"'<>\\)]+)/i);
+    if (m) url = `${m[1]}:${m[2]}`;
+    // pola "//domain/path" polos (gak punya scheme)
+    else if (m = text.match(/^\/\/[a-z0-9][a-z0-9.-]*\.[a-z]{2,}[^\s"'<>\\)]*$/i)) url = `https:${m[0]}`;
+    else return null;
+  }
+  if (['www.google.com', 'favicon.ico'].includes(url)) return null;
+  try { if (new URL(url).hostname.endsWith('blogspot.com') && !/[?&]i=/.test(url)) return null; } catch { return null; }
+  return normUrl(url);
+}
+
+function decodeParamCandidates(url, html) {
+  const seen = new Set();
+  const out = [];
+  const add = (text, kind) => {
+    const u = extractDecodedUrl(text);
+    if (u && !seen.has(u)) {
+      seen.add(u);
+      out.push({ u, kind });
+    }
+  };
+  // 1) param query di-encode (base64 / base64+safelink)
+  try {
+    for (const v of new URL(url).searchParams.values()) {
+      const d = b64tryDecode(v);
+      if (!d) continue;
+      add(d, 'param-b64');
+      const dc = dcdDecode(d);
+      if (dc) add(dc, 'param-safelink');
+    }
+  } catch { /* ignore */ }
+  // 2) atob("...") literal di dalam script halaman
+  if (html) {
+    let m;
+    const atobRe = /atob\(\s*["']([A-Za-z0-9+/=\\x]{12,}?)["']/g;
+    while ((m = atobRe.exec(html))) {
+      const d = b64tryDecode(m[1]);
+      if (!d) continue;
+      add(d, 'atob');
+      const dc = dcdDecode(d);
+      if (dc) add(dc, 'atob-safelink');
+      if (out.length >= 8) break;
+    }
+  }
+  return out.slice(0, 6);
+}
+
 function rawUrl(raw) {
   raw = raw.trim();
   if (!/^https?:\/\//i.test(raw)) raw = `https://${raw}`;
@@ -52,6 +142,9 @@ function isAdNoise(u) {
     return true;
   }
 }
+
+// domain portal/iklan yang jelas bukan target konten: skip crawl sub-step
+const NOISE_HOST_RE = /(^|\.)(google|gstatic|googleapis|blogger|facebook|instagr|pinterest|pinimg|bing|microsoft|live|yahoo|doubleclick|adsystem|twitter|x|tiktok)\.(com|net|org|co|io)$/i;
 
 async function fetchPage(url, { head = false, timeout = MAX_MINUTES } = {}) {
   const started = Date.now();
@@ -218,8 +311,11 @@ async function resolve(inputUrl) {
   if (!html) return { ok: true, input: inputUrl, trace, primary: current !== origin ? current : null, media: [], links: [], errors };
 
   const chainEnd = current;
+  let primary = null;
   const page = extractLinks(html, current);
+  const paramLinks = decodeParamCandidates(current, html);
   const queue = [
+    ...paramLinks.filter((c) => !isAdNoise(c.u)).map((c) => ({ u: c.u, kind: c.kind })),
     ...page.media.filter((md) => !isAdNoise(md.u)).map((md) => ({ u: md.u })),
     ...page.candidates,
   ];
@@ -235,6 +331,9 @@ async function resolve(inputUrl) {
     if (!candidate) break;
     if (allMedia.has(candidate.u) || visited.has(candidate.u)) continue;
     visited.add(candidate.u);
+    let hn = null;
+    try { hn = new URL(candidate.u).hostname; } catch { continue; }
+    if (NOISE_HOST_RE.test(hn)) continue;
 
     // if candidate itself looks like a media file, verify
     if (MEDIA_RE.test(new URL(candidate.u).pathname)) {
@@ -262,8 +361,11 @@ async function resolve(inputUrl) {
     }
     const ct = r.res.headers.get('content-type') || '';
     trace.push(hopEntry('step', candidate.u, { status: r.res.status, ms: r.ms, note: ct.split(';')[0] }));
+    if (/^param-/.test(candidate.kind) && !primary && ct.startsWith('text/html')) primary = candidate.u;
     if (ct.startsWith('text/html')) {
       const sub = extractLinks(r.body, candidate.u);
+      const subParams = decodeParamCandidates(candidate.u, r.body);
+      queue.unshift(...subParams.map((c) => ({ u: c.u, kind: c.kind })));
       const mediaFirst = sub.media
         .filter((md) => !allMedia.has(md.u) && !isAdNoise(md.u))
         .map((md) => ({ u: md.u }));
@@ -295,7 +397,7 @@ async function resolve(inputUrl) {
     ok: true,
     input: inputUrl,
     trace,
-    primary: merged.length || chainEnd === origin ? null : chainEnd,
+    primary: primary || (merged.length || chainEnd === origin ? null : chainEnd),
     media: merged,
     links: page.candidates.map((c) => c.u).filter((u) => !isSameHost(u, inputUrl)).slice(0, 25),
     errors,
