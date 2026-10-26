@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LINKUPFIND | Link Inspector</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=Chakra+Petch:wght@600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="wordmark">
+      <span class="wordmark-main">LINKUP</span><span class="wordmark-sub">FIND</span>
+      <span class="ver">v2.0 / intercept console</span>
+    </div>
+    <div class="conn" id="conn-state" title="status">
+      <span class="clock mono" id="clock">--:--:--</span><span class="dot"></span><span class="conn-label">ready</span>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="intro" id="intro">
+      <p class="kicker mono">Signal trace console</p>
+      <h1>Know where a link ends<br>before you click it.</h1>
+      <p class="lede">Paste any link. We map its whole journey, hop by hop, then inspect the file waiting at the
+        end: content type and size, checked live over HTTP HEAD. No guessing, no clicking blind.</p>
+    </section>
+
+    <form class="inputrow" id="form" autocomplete="off">
+      <label class="input-prefix mono" for="url">http</label>
+      <input type="text" id="url" name="url" spellcheck="false"
+             placeholder="paste a link here, http:// or https://"
+             aria-label="Link to inspect" required>
+      <button type="submit" id="btn" class="btn-resolve">TRACE<span class="btn-key">⏎</span></button>
+    </form>
+
+    <div class="hints mono">
+      <span>inspects:</span>
+      <code>mp4</code><code>mkv</code><code>webm</code><code>mp3</code><code>m3u8</code><code>zip</code><code>rar</code><code>pdf</code><code>apk</code>
+      <span class="hints-note">wild redirect chains, shorteners and interstitial pages</span>
+      <span class="hints-note"><code class="kbd">/</code> focus · <code class="kbd">esc</code> clear</span>
+    </div>
+
+    <section class="output" id="output" hidden>
+      <!-- trace + results render here -->
+    </section>
+
+    <section class="empty-state" id="empty-state">
+      <div class="es-grid">
+        <div class="es-cell">
+          <span class="es-num mono">01</span>
+          <span class="es-label">paste</span>
+          <p>Any link you're about to send, share, or download. Especially the ones from pages with a dozen "Generate Link" buttons.</p>
+        </div>
+        <div class="es-cell">
+          <span class="es-num mono">02</span>
+          <span class="es-label">trace</span>
+          <p>The engine follows and records every hop: 30x redirects, meta refresh, JS redirects, iframes.</p>
+        </div>
+        <div class="es-cell">
+          <span class="es-num mono">03</span>
+          <span class="es-label">verify</span>
+          <p>The destination gets checked with HTTP HEAD. Content type and file size are shown as facts, not guesses.</p>
+        </div>
+      </div>
+    </section>
+
+    <footer class="foot mono">
+      <span>history lives in your browser only</span>
+      <span class="foot-right" id="history"></span>
+    </footer>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>

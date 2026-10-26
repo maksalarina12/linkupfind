@@ -1,0 +1,14 @@
+{
+  "name": "linkupfind",
+  "version": "1.0.0",
+  "description": "Link resolver: paste a gated/redirect link, get the real direct file link",
+  "type": "module",
+  "main": "server.mjs",
+  "scripts": {
+    "start": "node server.mjs",
+    "dev": "node --watch server.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
